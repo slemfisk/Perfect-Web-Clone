@@ -6,6 +6,7 @@ These tests describe the user-facing `pwc` commands. They must fail until
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -78,6 +79,51 @@ def test_plan_unknown_source_id_is_json_error():
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
     assert "source" in payload["error"].lower() or "unknown" in payload["error"].lower()
+
+
+def test_build_without_sandbox_is_json_error(tmp_path):
+    env = {**os.environ, "PWC_SANDBOX_DIR": str(tmp_path / "sandboxes")}
+    result = _run(["build"], env=env)
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert "sandbox" in payload["error"].lower()
+
+
+def test_assemble_resumes_sandbox_across_processes(tmp_path):
+    # Each `pwc` call is a fresh process; the second assemble must find the
+    # section the agent wrote into the first one's work_dir.
+    sources = tmp_path / "sources"
+    src = sources / "example-1-abc123"
+    src.mkdir(parents=True)
+    (src / "manifest.json").write_text('{"success": true}', encoding="utf-8")
+    comp = "src/components/sections/hero/Hero.jsx"
+    plan = {
+        "source_url": "https://example.com",
+        "section_count": 1,
+        "sections": [{"name": "hero", "namespace": "hero", "component_path": comp}],
+        "assembly_template": {"component_order": [{
+            "order": 0, "import_name": "Hero", "namespace": "hero",
+            "import_path": "./components/sections/hero/Hero",
+        }]},
+    }
+    (src / "sections.json").write_text(json.dumps(plan), encoding="utf-8")
+    env = {
+        **os.environ,
+        "PWC_SOURCES_DIR": str(sources),
+        "PWC_SANDBOX_DIR": str(tmp_path / "sandboxes"),
+    }
+
+    first = json.loads(_run(["assemble", src.name], env=env).stdout)
+    assert first["missing_section_files"] == [comp]
+    work_dir = Path(first["work_dir"])
+    (work_dir / comp).parent.mkdir(parents=True)
+    (work_dir / comp).write_text("export default () => <h1>hi</h1>;\n", encoding="utf-8")
+
+    second = json.loads(_run(["assemble", src.name], env=env).stdout)
+    assert second["ok"] is True
+    assert second["work_dir"] == first["work_dir"]
+    assert second["run_ledger_created"] is False
 
 
 def test_section_unknown_source_id_is_json_error():

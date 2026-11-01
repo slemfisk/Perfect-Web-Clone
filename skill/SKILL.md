@@ -124,7 +124,9 @@ pwc assemble <source_id>
 ```
 
 Missing section files are expected on this first call. Assembly initializes
-`.pwc/run.json`; read, update, and rewrite that ledger as the agent advances.
+`.pwc/run.json` and returns `work_dir`, the clone project root; every project
+path below (`src/...`, `.pwc/...`, `dist/`) is relative to it. Read, update, and
+rewrite that ledger as the agent advances.
 
 For each planned section, in order:
 

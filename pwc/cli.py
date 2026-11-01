@@ -173,4 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.command:
         parser.print_help()
         return 2
-    return args.func(args)
+    try:
+        return args.func(args)
+    except Exception as exc:  # noqa: BLE001 — every command must answer in JSON
+        return _exit_from({"ok": False, "error": f"{type(exc).__name__}: {exc}"})

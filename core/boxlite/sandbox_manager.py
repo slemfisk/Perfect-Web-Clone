@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -892,6 +893,32 @@ _sandboxes: Dict[str, BoxLiteSandbox] = {}
 SINGLETON_MODE = os.getenv("BOXLITE_SINGLETON_MODE", "true").lower() in ("true", "1", "yes")
 _singleton_id: Optional[str] = None
 
+# Every `pwc` command is a fresh process, so the registry above starts empty.
+# This file names the last created sandbox so later processes can re-attach.
+_ACTIVE_POINTER = Path(SANDBOX_BASE_DIR) / ".active"
+
+
+def _load_active() -> Optional[BoxLiteSandbox]:
+    """Re-attach the sandbox named by the on-disk pointer, without wiping files."""
+    global _singleton_id
+    try:
+        sandbox_id = _ACTIVE_POINTER.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    # The id becomes a path that a later reset wipes; refuse anything but a plain name.
+    if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", sandbox_id):
+        return None
+    sb = BoxLiteSandbox(sandbox_id)
+    if not sb.work_dir.is_dir():
+        return None
+    sb._scan_files_from_disk()
+    sb.state.status = SandboxStatus.READY
+    sb._initialized = True
+    _sandboxes[sandbox_id] = sb
+    if SINGLETON_MODE:
+        _singleton_id = sandbox_id
+    return sb
+
 
 async def create_sandbox(sandbox_id: Optional[str] = None, reset: bool = True) -> BoxLiteSandbox:
     """Create (and initialize) a sandbox. In singleton mode reuses one instance.
@@ -910,16 +937,17 @@ async def create_sandbox(sandbox_id: Optional[str] = None, reset: bool = True) -
     if SINGLETON_MODE:
         _singleton_id = sb.sandbox_id
     await sb.initialize(reset=True)
+    _ACTIVE_POINTER.write_text(sb.sandbox_id, encoding="utf-8")
     return sb
 
 
 def get_sandbox(sandbox_id: Optional[str] = None) -> Optional[BoxLiteSandbox]:
-    """Fetch an existing sandbox by id (or the singleton if none given)."""
+    """Fetch an existing sandbox by id (or the singleton / on-disk active one if none given)."""
     if sandbox_id:
         return _sandboxes.get(sandbox_id)
     if SINGLETON_MODE and _singleton_id:
         return _sandboxes.get(_singleton_id)
-    return next(iter(_sandboxes.values()), None)
+    return next(iter(_sandboxes.values()), None) or _load_active()
 
 
 async def cleanup_sandbox(sandbox_id: str) -> None:

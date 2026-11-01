@@ -517,6 +517,7 @@ async def assemble_project(source_id: str) -> Dict[str, Any]:
     return {
         "ok": len(missing) == 0,
         "source_id": source_id,
+        "work_dir": str(sb.work_dir),
         "section_count": plan.get("section_count", 0),
         "written_files": written,
         "expected_section_files": expected,
